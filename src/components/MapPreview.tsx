@@ -1,4 +1,45 @@
+import { useState } from "react";
+import { apiFetchJson } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+type LiveTruckResponse = {
+  vehicle_id: string;
+  current_location: {
+    lat: number;
+    lng: number;
+  };
+  co2_emitted_so_far: number;
+  message?: string;
+};
+
 const MapPreview = () => {
+  const [vehicleId, setVehicleId] = useState("TRUCK-001");
+  const [liveData, setLiveData] = useState<LiveTruckResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const fetchLive = async (id: string) => {
+    if (!id.trim()) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const data = await apiFetchJson<LiveTruckResponse>(`/gps/live/${encodeURIComponent(id)}`);
+
+      if (data.message) {
+        setLiveData(null);
+        setErrorMessage(data.message);
+      } else {
+        setLiveData(data);
+      }
+    } catch (error) {
+      setErrorMessage("Unable to load live tracking data.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <section className="py-24 px-4" id="map">
       <div className="container mx-auto">
@@ -10,6 +51,30 @@ const MapPreview = () => {
           <p className="text-muted-foreground mt-4 max-w-xl mx-auto">
             See real-time emission data overlaid on interactive maps with color-coded route severity.
           </p>
+        </div>
+
+        <div className="mx-auto mb-6 flex max-w-4xl flex-col gap-3 rounded-2xl border border-emerald/10 bg-white/70 p-4 shadow-soft backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">Live vehicle lookup</h3>
+            <p className="text-xs text-muted-foreground">Enter a vehicle ID to track its latest location.</p>
+          </div>
+          <form
+            className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              fetchLive(vehicleId);
+            }}
+          >
+            <Input
+              value={vehicleId}
+              onChange={(event) => setVehicleId(event.target.value)}
+              placeholder="Vehicle ID"
+              className="sm:w-56"
+            />
+            <Button type="submit" variant="heroOutline" disabled={isLoading}>
+              {isLoading ? "Loading..." : "Track"}
+            </Button>
+          </form>
         </div>
 
         <div className="relative max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl border border-border">
@@ -45,18 +110,28 @@ const MapPreview = () => {
 
             {/* Tooltip cards */}
             <div className="absolute top-16 right-16 glass-card-dark rounded-xl px-4 py-3 text-primary-foreground text-xs">
-              <div className="font-semibold text-sm mb-1">Route A-42</div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-emerald" />
-                <span>12.4 kg CO₂ · Low</span>
-              </div>
+              <div className="font-semibold text-sm mb-1">Live Vehicle</div>
+              {liveData ? (
+                <div className="space-y-1">
+                  <div>ID: {liveData.vehicle_id}</div>
+                  <div>
+                    {liveData.current_location.lat.toFixed(4)}, {liveData.current_location.lng.toFixed(4)}
+                  </div>
+                  <div>{liveData.co2_emitted_so_far.toFixed(3)} kg CO₂</div>
+                </div>
+              ) : (
+                <div className="text-primary-foreground/70">{errorMessage ?? "No live data loaded."}</div>
+              )}
             </div>
 
             <div className="absolute bottom-20 left-16 glass-card-dark rounded-xl px-4 py-3 text-primary-foreground text-xs">
-              <div className="font-semibold text-sm mb-1">Route B-17</div>
+              <div className="font-semibold text-sm mb-1">Status</div>
               <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full" style={{ background: "hsl(35, 90%, 55%)" }} />
-                <span>34.8 kg CO₂ · Medium</span>
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: liveData ? "hsl(152, 60%, 50%)" : "hsl(35, 90%, 55%)" }}
+                />
+                <span>{liveData ? "Tracking active" : "Awaiting data"}</span>
               </div>
             </div>
 

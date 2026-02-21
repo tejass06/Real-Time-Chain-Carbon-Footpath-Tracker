@@ -3,11 +3,17 @@ import { useLocation } from "react-router-dom";
 import { Leaf, Truck, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const navLinks = ["Home", "Dashboard", "Records", "Optimization", "Reports", "Login"];
+const navLinks = ["Home", "Dashboard", "Profile", "Records", "Optimization", "Reports", "Login"];
 
 const getNavHref = (link: string) => {
   if (link === "Dashboard") {
     return "/dashboard";
+  }
+  if (link === "Profile") {
+    return "/profile";
+  }
+  if (link === "Optimization") {
+    return "/optimization";
   }
   if (link === "Login") {
     return "/login";
