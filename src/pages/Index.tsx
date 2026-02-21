@@ -1,7 +1,7 @@
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
 import Features from "@/components/Features";
-import Stats from "@/components/Stats";
+
 import MapPreview from "@/components/MapPreview";
 import WhyChooseUs from "@/components/WhyChooseUs";
 import Footer from "@/components/Footer";
@@ -12,7 +12,7 @@ const Index = () => {
       <Navbar />
       <Hero />
       <Features />
-      <Stats />
+      
       <MapPreview />
       <WhyChooseUs />
       <Footer />
