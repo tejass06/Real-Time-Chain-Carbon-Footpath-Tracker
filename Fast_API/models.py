@@ -2,11 +2,21 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boo
 from database import Base
 from datetime import datetime
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Company(Base):
     __tablename__ = "companies"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String, index=True)
     industry = Column(String)
     carbon_credits = Column(Float, default=0.0)
     carbon_credits_redeemed = Column(Float, default=0.0)
@@ -48,3 +58,23 @@ class GPSTrack(Base):
     distance_segment = Column(Float)
     co2_segment = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+
+class SupplierReport(Base):
+    __tablename__ = "supplier_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_name = Column(String, index=True)
+    start_lat = Column(Float)
+    start_lng = Column(Float)
+    end_lat = Column(Float)
+    end_lng = Column(Float)
+    reported_distance = Column(Float)
+    reported_time = Column(Float)
+    verified_distance = Column(Float)
+    verified_time = Column(Float)
+    vehicle_type = Column(String)
+    reported_co2 = Column(Float)
+    verified_co2 = Column(Float)
+    verification_status = Column(String)  # verified / flagged / warning
+    created_at = Column(DateTime, default=datetime.utcnow)

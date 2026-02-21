@@ -61,3 +61,62 @@ class CarbonCreditsResponse(BaseModel):
     redeemed_credits: float
     total_available: float
     recent_credits: list[CarbonCreditRecord]
+
+
+class SupplierReportCreate(BaseModel):
+    supplier_name: str
+    start_lat: float
+    start_lng: float
+    end_lat: float
+    end_lng: float
+    reported_distance: float
+    reported_time: float
+    vehicle_type: str
+
+
+class SupplierReportResponse(BaseModel):
+    id: int
+    supplier_name: str
+    start_lat: float
+    start_lng: float
+    end_lat: float
+    end_lng: float
+    reported_distance: float
+    reported_time: float
+    verified_distance: float
+    verified_time: float
+    vehicle_type: str
+    reported_co2: float
+    verified_co2: float
+    verification_status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserSignup(BaseModel):
+    email: str
+    password: str
+    company_name: str
+    industry: str
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    company_id: Optional[int]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AuthResponse(BaseModel):
+    user: UserResponse
+    message: str

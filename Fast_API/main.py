@@ -1,11 +1,23 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date, timedelta, datetime
+import os
+import hashlib
+import uuid
+from pathlib import Path
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+except ImportError:
+    print("⚠️  python-dotenv not installed. Install with: pip install python-dotenv")
 
 from database import Base, engine, get_db
-from models import Trip, GPSTrack, Company, CarbonCredit
+from models import Trip, GPSTrack, Company, CarbonCredit, SupplierReport, User
 from schemas import (
     TripCreate,
     GPSUpdate,
@@ -15,6 +27,12 @@ from schemas import (
     CarbonCreditRedemption,
     CarbonCreditsResponse,
     CarbonCreditRecord,
+    SupplierReportCreate,
+    SupplierReportResponse,
+    UserSignup,
+    UserLogin,
+    UserResponse,
+    AuthResponse,
 )
 
 app = FastAPI()
@@ -36,11 +54,47 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 
+# Password hashing functions
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return hash_password(password) == password_hash
+
+# CO2 emission factors per km
 EMISSION_FACTORS = {
     "diesel": 0.27,
     "petrol": 0.24,
     "electric": 0.02
 }
+
+# Idle emission factors per hour (vehicle running but stationary)
+IDLE_FACTORS = {
+    "diesel": 0.15,
+    "petrol": 0.12,
+    "electric": 0.01
+}
+
+def calculate_co2_emissions(distance_km: float, time_hours: float, vehicle_type: str) -> float:
+    """
+    Calculate CO2 emissions using formula:
+    CO₂ = distance × factor + time × idle_factor
+    
+    Args:
+        distance_km: Distance traveled in kilometers
+        time_hours: Time taken in hours
+        vehicle_type: Type of vehicle (diesel, petrol, electric)
+    
+    Returns:
+        CO2 emissions in kg
+    """
+    vehicle_type_lower = vehicle_type.lower()
+    distance_factor = EMISSION_FACTORS.get(vehicle_type_lower, 0.27)
+    idle_factor = IDLE_FACTORS.get(vehicle_type_lower, 0.15)
+    
+    # Calculate CO2: distance emissions + idle emissions
+    co2 = (distance_km * distance_factor) + (time_hours * idle_factor)
+    return round(co2, 4)
 
 # Test endpoint
 @app.get("/health")
@@ -48,12 +102,69 @@ def health_check():
     return {"status": "ok"}
 
 # -------------------------
+# Authentication Endpoints
+# -------------------------
+@app.post("/auth/signup", response_model=AuthResponse)
+def signup(user: UserSignup, db: Session = Depends(get_db)):
+    try:
+        # Check if user already exists
+        existing_user = db.query(User).filter(User.email == user.email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Create company with unique name (add UUID suffix to avoid conflicts)
+        unique_suffix = str(uuid.uuid4())[:8]
+        unique_company_name = f"{user.company_name}-{unique_suffix}"
+        new_company = Company(name=unique_company_name, industry=user.industry)
+        db.add(new_company)
+        db.flush()
+        
+        # Create user
+        password_hash = hash_password(user.password)
+        new_user = User(email=user.email, password_hash=password_hash, company_id=new_company.id)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return {
+            "user": new_user,
+            "message": "Account created successfully. You are now logged in."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
+
+@app.post("/auth/login", response_model=AuthResponse)
+def login(credentials: UserLogin, db: Session = Depends(get_db)):
+    try:
+        # Find user by email
+        user = db.query(User).filter(User.email == credentials.email).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        if not verify_password(credentials.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        return {
+            "user": user,
+            "message": "Login successful"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+# -------------------------
 # Create Trip + CO2
 # -------------------------
 @app.post("/trips")
 def create_trip(trip: TripCreate, db: Session = Depends(get_db)):
-    factor = EMISSION_FACTORS[trip.vehicle_type.lower()]
-    co2 = trip.distance_km * factor
+    # Note: TripCreate doesn't include time, so we estimate based on average speed
+    # Average speed ~ 50 km/h for urban, 80 km/h for highway (use 60 km/h average)
+    estimated_time_hours = trip.distance_km / 60.0
+    co2 = calculate_co2_emissions(trip.distance_km, estimated_time_hours, trip.vehicle_type)
 
     new_trip = Trip(
         vehicle_type=trip.vehicle_type,
@@ -151,7 +262,7 @@ def daily_trend(db: Session = Depends(get_db)):
         day_str = str(current_day)
         trend.append({
             "date": day_str,
-            "total_co2": totals_by_day.get(day_str, 0)
+            "co2": totals_by_day.get(day_str, 0)
         })
 
     return trend
@@ -173,6 +284,71 @@ def monthly_footprint(db: Session = Depends(get_db)):
         "year": today.year,
         "total_co2": round(total or 0, 2)
     }
+
+# -------------------------
+# All Daily Footprints (for Records page)
+# -------------------------
+@app.get("/footprint/daily/all")
+def all_daily_footprints(db: Session = Depends(get_db)):
+    """
+    Get all daily footprint data grouped by date, ordered by date descending
+    Returns array of {date, co2}
+    """
+    results = db.query(
+        func.date(Trip.created_at).label("day"),
+        func.sum(Trip.co2_kg).label("total_co2")
+    ).group_by(
+        func.date(Trip.created_at)
+    ).order_by(
+        func.date(Trip.created_at).desc()
+    ).all()
+
+    daily_footprints = [
+        {
+            "date": str(row.day),
+            "co2": round(row.total_co2 or 0, 2)
+        }
+        for row in results
+    ]
+
+    return daily_footprints
+
+# -------------------------
+# All Monthly Footprints (for Records page)
+# -------------------------
+@app.get("/footprint/monthly/all")
+def all_monthly_footprints(db: Session = Depends(get_db)):
+    """
+    Get all monthly footprint data grouped by month/year
+    Returns array of {month, year, total_co2}
+    """
+    results = db.query(
+        func.extract("year", Trip.created_at).label("year_val"),
+        func.extract("month", Trip.created_at).label("month_val"),
+        func.sum(Trip.co2_kg).label("total_co2")
+    ).group_by(
+        func.extract("year", Trip.created_at),
+        func.extract("month", Trip.created_at)
+    ).order_by(
+        func.extract("year", Trip.created_at).desc(),
+        func.extract("month", Trip.created_at).desc()
+    ).all()
+
+    month_names = [
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+
+    monthly_footprints = [
+        {
+            "month": month_names[int(row.month_val)],
+            "year": int(row.year_val),
+            "total_co2": round(row.total_co2 or 0, 2)
+        }
+        for row in results
+    ]
+
+    return monthly_footprints
 
 # -------------------------
 # Stats Summary
@@ -280,7 +456,7 @@ def recent_trips(limit: int = 8, db: Session = Depends(get_db)):
 # Route Chart API
 # -------------------------
 @app.get("/charts/routes")
-def route_wise_emission(db: Session = Depends(get_db)):
+def route_wise_emission(limit: int = 10, db: Session = Depends(get_db)):
     results = db.query(
         Trip.start_location,
         Trip.end_location,
@@ -288,7 +464,7 @@ def route_wise_emission(db: Session = Depends(get_db)):
     ).group_by(
         Trip.start_location,
         Trip.end_location
-    ).all()
+    ).order_by(func.sum(Trip.co2_kg).desc()).limit(limit).all()
 
     return [
         {
@@ -302,13 +478,13 @@ def route_wise_emission(db: Session = Depends(get_db)):
 # Vehicle Chart API
 # -------------------------
 @app.get("/charts/vehicles")
-def vehicle_wise_emission(db: Session = Depends(get_db)):
+def vehicle_wise_emission(limit: int = 10, db: Session = Depends(get_db)):
     results = db.query(
         Trip.vehicle_type,
         func.sum(Trip.co2_kg).label("total_co2")
     ).group_by(
         Trip.vehicle_type
-    ).all()
+    ).order_by(func.sum(Trip.co2_kg).desc()).limit(limit).all()
 
     return [
         {
@@ -539,4 +715,155 @@ def award_carbon_credits(company_id: int, credits: float, reason: str = "Manual 
         "message": "Credits awarded successfully",
         "credits_awarded": round(credits, 2),
         "total_credits": round(company.carbon_credits, 2)
+    }
+
+# -------------------------
+# Supplier Report Endpoints
+# -------------------------
+
+import math
+import requests
+
+def calculate_haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance between two points using Haversine formula (in km) - fallback method"""
+    R = 6371  # Earth's radius in kilometers
+    
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_lat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
+
+def get_mapbox_route_data(start_lat: float, start_lng: float, end_lat: float, end_lng: float):
+    """
+    Call Mapbox Directions API to get real road distance and travel time
+    Returns: (distance_km, duration_hours, route_geometry)
+    """
+    # Get Mapbox token from environment variable
+    mapbox_token = os.getenv("MAPBOX_TOKEN", "")
+    
+    # Check if token is set and valid
+    if not mapbox_token or mapbox_token == "your_mapbox_token_here":
+        print("⚠️  MAPBOX_TOKEN not configured. Using Haversine fallback.")
+        print("📋 To enable Mapbox API:")
+        print("   1. Get free token from: https://account.mapbox.com/access-tokens/")
+        print("   2. Add to Fast_API/.env file: MAPBOX_TOKEN=your_actual_token")
+        distance_km = calculate_haversine_distance(start_lat, start_lng, end_lat, end_lng)
+        duration_hours = distance_km / 60  # Assume 60 km/h
+        return distance_km, duration_hours, None
+    
+    # Mapbox Directions API endpoint
+    url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{start_lng},{start_lat};{end_lng},{end_lat}"
+    
+    params = {
+        "access_token": mapbox_token,
+        "geometries": "geojson",
+        "overview": "full"
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("routes") and len(data["routes"]) > 0:
+            route = data["routes"][0]
+            distance_meters = route.get("distance", 0)
+            duration_seconds = route.get("duration", 0)
+            geometry = route.get("geometry", None)
+            
+            distance_km = distance_meters / 1000
+            duration_hours = duration_seconds / 3600
+            
+            return distance_km, duration_hours, geometry
+        else:
+            # Fallback to Haversine if no routes found
+            distance_km = calculate_haversine_distance(start_lat, start_lng, end_lat, end_lng)
+            duration_hours = distance_km / 60  # Assume 60 km/h
+            return distance_km, duration_hours, None
+            
+    except Exception as e:
+        print(f"Mapbox API error: {e}")
+        # Fallback to Haversine calculation
+        distance_km = calculate_haversine_distance(start_lat, start_lng, end_lat, end_lng)
+        duration_hours = distance_km / 60  # Assume 60 km/h
+        return distance_km, duration_hours, None
+
+@app.post("/supplier/report", response_model=SupplierReportResponse)
+def create_supplier_report(report: SupplierReportCreate, db: Session = Depends(get_db)):
+    """
+    Create a supplier report with automatic verification using Mapbox Directions API.
+    Compares reported data with real road distance and travel time.
+    """
+    
+    # Get verified distance and time from Mapbox Directions API
+    verified_distance, verified_time, route_geometry = get_mapbox_route_data(
+        report.start_lat,
+        report.start_lng,
+        report.end_lat,
+        report.end_lng
+    )
+    
+    # Calculate CO2 emissions using new formula: CO₂ = distance × factor + time × idle_factor
+    reported_co2 = calculate_co2_emissions(report.reported_distance, report.reported_time, report.vehicle_type)
+    verified_co2 = calculate_co2_emissions(verified_distance, verified_time, report.vehicle_type)
+    
+    # Calculate difference percentage
+    distance_diff_pct = abs(report.reported_distance - verified_distance) / verified_distance * 100 if verified_distance > 0 else 0
+    
+    # Determine verification status
+    if distance_diff_pct < 5:
+        verification_status = "verified"
+    elif distance_diff_pct < 15:
+        verification_status = "warning"
+    else:
+        verification_status = "flagged"
+    
+    # Create supplier report record
+    new_report = SupplierReport(
+        supplier_name=report.supplier_name,
+        start_lat=report.start_lat,
+        start_lng=report.start_lng,
+        end_lat=report.end_lat,
+        end_lng=report.end_lng,
+        reported_distance=report.reported_distance,
+        reported_time=report.reported_time,
+        verified_distance=verified_distance,
+        verified_time=verified_time,
+        vehicle_type=report.vehicle_type,
+        reported_co2=reported_co2,
+        verified_co2=verified_co2,
+        verification_status=verification_status
+    )
+    
+    db.add(new_report)
+    db.commit()
+    db.refresh(new_report)
+    
+    return new_report
+
+@app.get("/supplier/reports", response_model=list[SupplierReportResponse])
+def get_supplier_reports(limit: int = 50, db: Session = Depends(get_db)):
+    """
+    Get all supplier reports ordered by creation date (newest first)
+    """
+    reports = db.query(SupplierReport).order_by(SupplierReport.created_at.desc()).limit(limit).all()
+    return reports
+
+@app.get("/supplier/route")
+def get_supplier_route(start_lat: float, start_lng: float, end_lat: float, end_lng: float):
+    """
+    Get route geometry from Mapbox Directions API for visualization
+    Returns route distance, duration, and geometry for drawing on map
+    """
+    distance_km, duration_hours, geometry = get_mapbox_route_data(start_lat, start_lng, end_lat, end_lng)
+    
+    return {
+        "distance_km": round(distance_km, 2),
+        "duration_hours": round(duration_hours, 2),
+        "geometry": geometry
     }
