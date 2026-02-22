@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
-import { Leaf, Truck, Menu, X } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Leaf, Truck, Menu, X, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const navLinks = ["Home", "Dashboard", "Profile", "Records", "Optimization", "Reports", "Login"];
+const navLinks = ["Home", "Dashboard", "Profile", "Records", "Optimization", "Supplier Reports"];
 
 const getNavHref = (link: string) => {
   if (link === "Dashboard") {
@@ -12,27 +12,50 @@ const getNavHref = (link: string) => {
   if (link === "Profile") {
     return "/profile";
   }
+  if (link === "Records") {
+    return "/records";
+  }
   if (link === "Optimization") {
     return "/optimization";
   }
-  if (link === "Login") {
-    return "/login";
+  if (link === "Supplier Reports") {
+    return "/supplier-reports";
   }
   return `#${link.toLowerCase()}`;
 };
 
 const Navbar = () => {
+  const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
   const location = useLocation();
   const isDashboard = location.pathname.startsWith("/dashboard");
-  const visibleLinks = navLinks.filter((link) => !(isDashboard && link === "Home"));
+  const isSupplierReports = location.pathname.startsWith("/supplier-reports");
+  const isProfile = location.pathname.startsWith("/profile");
+  const isRecords = location.pathname.startsWith("/records");
+  const isOptimization = location.pathname.startsWith("/optimization");
+  const visibleLinks = navLinks.filter((link) => !((isDashboard || isSupplierReports || isProfile || isRecords || isOptimization) && link === "Home"));
+
+  useEffect(() => {
+    // Check if user is logged in
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    }
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    setUser(null);
+    navigate("/");
+  };
 
   return (
     <header
@@ -42,7 +65,7 @@ const Navbar = () => {
     >
       <div className="container mx-auto flex items-center justify-between px-4">
         {/* Logo */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
           <div className="relative">
             <Leaf className="h-7 w-7 text-emerald" />
             <Truck className="absolute -bottom-1 -right-1 h-4 w-4 text-emerald-light" />
@@ -65,9 +88,40 @@ const Navbar = () => {
               {link}
             </a>
           ))}
-          <Button variant="hero" size="sm" className="ml-2">
-            Get Started
-          </Button>
+          
+          {user ? (
+            <div className="flex items-center gap-2 ml-4 border-l border-emerald/20 pl-4">
+              <span className={`text-sm font-medium ${scrolled ? "text-foreground" : "text-primary-foreground/80"}`}>
+                {user.email}
+              </span>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleLogout}
+                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 ml-4">
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => navigate("/login")}
+                className={scrolled ? "" : "text-primary-foreground hover:text-primary-foreground"}
+              >
+                Log In
+              </Button>
+              <Button 
+                variant="hero" 
+                size="sm"
+                onClick={() => navigate("/signup")}
+              >
+                Get Started
+              </Button>
+            </div>
+          )}
         </nav>
 
         {/* Mobile Toggle */}
@@ -92,7 +146,44 @@ const Navbar = () => {
               {link}
             </a>
           ))}
-          <Button variant="hero" className="w-full mt-2">Get Started</Button>
+          
+          {user ? (
+            <div className="mt-4 pt-4 border-t border-emerald/20">
+              <p className="px-4 py-2 text-sm text-muted-foreground">
+                Logged in as: {user.email}
+              </p>
+              <Button 
+                variant="ghost" 
+                className="w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                onClick={handleLogout}
+              >
+                <LogOut className="mr-2 h-4 w-4" /> Log Out
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-4 pt-4 border-t border-emerald/20 space-y-2">
+              <Button 
+                variant="ghost" 
+                className="w-full"
+                onClick={() => {
+                  navigate("/login");
+                  setMobileOpen(false);
+                }}
+              >
+                Log In
+              </Button>
+              <Button 
+                variant="hero" 
+                className="w-full"
+                onClick={() => {
+                  navigate("/signup");
+                  setMobileOpen(false);
+                }}
+              >
+                Get Started
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </header>

@@ -1,8 +1,11 @@
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, BarChart3 } from "lucide-react";
 import heroBg from "@/assets/hero-bg.jpg";
 
 const Hero = () => {
+  const navigate = useNavigate();
+
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Background Image */}
@@ -25,10 +28,20 @@ const Hero = () => {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 opacity-0 animate-fade-up-delay-3">
-          <Button variant="hero" size="lg" className="text-base px-8 py-6">
+          <Button 
+            variant="hero" 
+            size="lg" 
+            className="text-base px-8 py-6"
+            onClick={() => navigate("/signup")}
+          >
             Get Started <ArrowRight className="ml-1 h-5 w-5" />
           </Button>
-          <Button variant="heroOutline" size="lg" className="text-base px-8 py-6">
+          <Button 
+            variant="heroOutline" 
+            size="lg" 
+            className="text-base px-8 py-6"
+            onClick={() => navigate("/dashboard")}
+          >
             <BarChart3 className="mr-1 h-5 w-5" /> View Dashboard
           </Button>
         </div>

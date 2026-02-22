@@ -30,7 +30,16 @@ export const apiFetchJson = async <T>(path: string, options: FetchOptions = {}):
     });
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      let errorMessage = `API error: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+      } catch {
+        // If response is not JSON, use status message
+      }
+      throw new Error(errorMessage);
     }
 
     return (await response.json()) as T;
