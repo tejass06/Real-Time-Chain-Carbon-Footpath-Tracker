@@ -1,0 +1,2 @@
+# Quick Fix: Install python-dotenv
+pip install python-dotenv
