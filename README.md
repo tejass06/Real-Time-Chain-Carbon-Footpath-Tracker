@@ -34,5 +34,5 @@ To make carbon emissions transparent, measurable, and actionable in real time â€
 Built during a hackathon by:
 Tejas Shinde,
 Gurpreet Singh,
-Vikal Kumar Shinde,
+Vikal Kumar Shinde And 
 Siddharth lokhande.
