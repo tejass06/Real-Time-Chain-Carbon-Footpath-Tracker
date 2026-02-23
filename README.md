@@ -23,7 +23,7 @@ Downloadable emission reports
 
 # 🛠 Tech Stack
 Frontend: React.js, Chart libraries, MapBox API
-Backend: FastAPI
+Backend: FastAPI, 
 Carbon Engine: Python emission calculator
 Database: Neon DB
 
